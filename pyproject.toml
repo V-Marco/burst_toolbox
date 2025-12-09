@@ -16,7 +16,7 @@ dependencies = [
   "numpy",
   "pandas",
   "scipy",
-  "skimage"
+  "scikit-image"
 ]
 
 [tool.hatch.build.targets.wheel]
