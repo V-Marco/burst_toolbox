@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "burst_toolbox"
+version = "0.0.1"
+description = "Analysis of bursting in neural data"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+  { name="Vladimir Omelyusik", email="vsomelyusik@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "skimage"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
