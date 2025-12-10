@@ -3,6 +3,7 @@
 ## Installation (editable mode)
 ```{bash}
 git clone https://github.com/V-Marco/burst_toolbox.git
+cd burst_toolbox
 pip install -e .
 ```
 
