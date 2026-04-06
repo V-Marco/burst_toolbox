@@ -2,6 +2,8 @@ from scipy import signal
 from scipy.stats import entropy
 import numpy as np
 
+#TODO: add input contains NaNs warning / handling
+
 def compute_phase_burst_counts(
     LFP: np.ndarray, 
     bursts: np.ndarray, 
