@@ -10,7 +10,7 @@ def compute_phase_burst_counts(
     filter: bool = True, 
     phase_freq_band: np.ndarray = np.array([1, 100]), 
     num_bins: int = 18,
-    fs: int = 1000):
+    fs: int = 1000) -> np.ndarray:
     '''
     Count bursts in a specified phase-frequency band.
 
@@ -69,7 +69,7 @@ def compute_phase_burst_counts(
     
     return phase_burst_counts
 
-def phase_burst_coupling(phase_burst_counts: np.ndarray, win_len: int = 150, skip_allzero: bool = True):
+def phase_burst_coupling(phase_burst_counts: np.ndarray, win_len: int = 150, skip_allzero: bool = True) -> np.ndarray:
     '''
     Compute the phase-burst coupling index (PBC), i.e., the modulation index for bursts.
 
@@ -88,9 +88,6 @@ def phase_burst_coupling(phase_burst_counts: np.ndarray, win_len: int = 150, ski
     --------
     pbc: np.ndarray of shape (time,)
         Phase-burst coupling index.
-
-    phase_dist: np.ndarray of shape (time, num_bins)
-        Phase-burst distributions used to compute PBC.
     '''
 
     # Construct the phase distribution
@@ -110,7 +107,7 @@ def phase_burst_coupling(phase_burst_counts: np.ndarray, win_len: int = 150, ski
     num_bins = phase_dist.shape[1]
     pbc = (np.log(num_bins) - entropy(phase_dist, axis = 1)) / np.log(num_bins)
 
-    return pbc, phase_dist
+    return pbc
 
 def phase_locking_value_hilb(
         LFP: np.ndarray,
