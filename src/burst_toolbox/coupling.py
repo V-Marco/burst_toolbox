@@ -2,115 +2,238 @@ from scipy import signal
 from scipy.stats import entropy
 import numpy as np
 
-#TODO: add input contains NaNs warning / handling
-
-def compute_phase_burst_counts(
+def phase_histogram(
     LFP: np.ndarray, 
-    bursts: np.ndarray, 
-    filter: bool = True, 
-    phase_freq_band: np.ndarray = np.array([1, 100]), 
-    num_bins: int = 18,
+    events: np.ndarray, 
+    phase_freq_band: np.ndarray, 
+    n_bins: int = 18,
     fs: int = 1000):
     '''
-    Count bursts in a specified phase-frequency band.
+    Bin event values over the angles of a specified frequency band:
+    phase_hist(trial, timepoint, bin_id) = events(trial, timepoint)
 
     Parameters:
     -----------
-    LFP: np.ndarray of shape (num_trials, time)
+    LFP: np.ndarray of shape (n_trials, n_timepoints)
         LFP recordings.
 
-    bursts: np.ndarray of shape (num_trials, time)
-        Extracted bursts.
-
-    filter: bool, default = True
-        Whether to filter the data in the phase_freq_band.
+    events: np.ndarray of shape (n_trials, n_timepoints)
+        Events to bin.
     
-    phase_freq_band: np.ndarray of shape = (2,), default = array([1, 100])
-        Frequency band to extract phase from. Ignored if filter == False.
+    phase_freq_band: np.ndarray of shape = (2,)
+        Phase frequency band (min freq., max freq.).
 
-    num_bins: int, default = 18
+    n_bins: int, default = 18
         Number of phase bins.
     
     fs: int, default = 1000
-        Sampling frequency.
+        Sampling rate.
 
     Returns:
     --------
-    phase_burst_counts: np.ndarray of shape (num_trials, time, num_bins)
-        Phase-burst counts.
-    '''
+    phase_hist: np.ndarray of shape (n_trials, n_timepoints, n_bins)
+        Phase histogram.
     
-    phase_burst_counts = np.zeros((LFP.shape[0], LFP.shape[1], num_bins)) # (num_trials, time, num_bins)
-
-    # Set edges
-    step = 180 / num_bins * 2
-    edges = [(-180 + d * step, (-180 + step) + d * step) for d in range(num_bins)]
-
-    for trial_idx in range(len(LFP)):
-        # Compute phase of the trial
-        if filter:
-            sos = signal.butter(6, phase_freq_band * 2 / fs, "bandpass", output = 'sos')
-            trace = signal.sosfiltfilt(sos, LFP[trial_idx].flatten())
-        else:
-            trace = LFP[trial_idx].flatten()
-        phase = np.angle(signal.hilbert(trace), deg = True)
-
-        # Bin the phase angles
-        for timepoint in range(len(phase)):
-
-            # Find the bin index
-            final_bin_id = 0
-            for bin_id, edge in enumerate(edges):
-                if (phase[timepoint] >= edge[0]) & (phase[timepoint] <= edge[1]):
-                    final_bin_id = bin_id
-                    break
-            
-            phase_burst_counts[trial_idx, timepoint, final_bin_id] = phase_burst_counts[trial_idx, timepoint, final_bin_id] + bursts[trial_idx, timepoint]
-    
-    return phase_burst_counts
-
-def phase_burst_coupling(phase_burst_counts: np.ndarray, win_len: int = 150, skip_allzero: bool = True):
+    bin_edges: np.ndarray of shape (n_bins + 1,)
+        Phase angle bin edges in degrees (ranging from -180 to 180).
     '''
-    Compute the phase-burst coupling index (PBC), i.e., the modulation index for bursts.
+
+    # Data validity checks
+    if np.isnan(LFP).any() or np.isnan(events).any():
+        raise ValueError("Input contains NaN.")
+    
+    # Compute phase of all trials
+    sos = signal.butter(6, phase_freq_band * 2 / fs, "bandpass", output = 'sos')
+    LFP_filtered = signal.sosfiltfilt(sos, LFP, axis = 1)
+    phase = np.angle(signal.hilbert(LFP_filtered, axis = 1), deg = True)
+
+    # Set bins and digitize
+    # right = True creates intervals of (edge_i-1, edge_i]
+    # If beyond bounds, returns 0 or len(bins) as appropriate
+    bin_edges = np.linspace(-180, 180, n_bins + 1)
+    bin_indices = np.digitize(phase, bin_edges, right = True) - 1 # (n_trials, n_timepoints)
+
+    # Clip any potential floating-point out-of-bounds (e.g., -180.00001 or 180.00001)
+    bin_indices = np.clip(bin_indices, 0, n_bins - 1) # (n_trials, n_timepoints)
+
+    # Construct the phase histogram
+    phase_hist = np.zeros((LFP.shape[0], LFP.shape[1], n_bins)) # (n_trials, n_timepoints, n_bins)
+    for bin_idx in range(n_bins):
+        phase_hist[:, :, bin_idx] = np.where(bin_indices == bin_idx, events, 0)
+    
+    return phase_hist, bin_edges
+
+def phase_amplitude_coupling(
+        phase_amplitude_hist: np.ndarray, 
+        win_len: int = 150,
+        right_edge_effect: str = "ignore"
+        ):
+    '''
+    Compute phase-amplitude coupling (PAC) measure (see [Tort2010] for details) in a sliding window. PAC compares the entropy of the phase-amplitude distribution with that of the uniform distribution and reflects 
+    the degree to which amplitude values cluster at particular phase angles:
+
+    PAC(t) = [entropy(Unifrom distr.) - entropy(Phase-ampl. distr.)] / entropy(Unifrom distr.)
 
     Parameters:
     -----------
-    phase_burst_counts: np.ndarray of shape (num_trials, time, num_bins)
-        Phase-burst counts.
+    phase_amplitude_hist: np.ndarray of shape (n_trials, n_timepoints, n_bins)
+        Phase-amplitude distribution.
     
     win_len: int
-        Length of the time window to compute counts over.
-
-    skip_allzero: bool, default = True
-        Skip trials with no events.
+        Length of the time window over which to compute counts.
+    
+    right_edge_effect: str, default = "ignore"
+        Strategy for handling sliding windows that extend past the right edge of the time series.
+        - "ignore": do nothing;
+        - "nan": assign NaN to the PBC values for the incomplete trailing windows, starting at index n_timepoints - win_len.
     
     Returns:
     --------
-    pbc: np.ndarray of shape (time,)
-        Phase-burst coupling index.
+    pac: np.ndarray of shape (n_timepoints,)
+        Phase-burst coupling measure.
 
-    phase_dist: np.ndarray of shape (time, num_bins)
-        Phase-burst distributions used to compute PBC.
+    sliding_phase_dist: np.ndarray of shape (n_timepoints, n_bins)
+        The phase-burst distribution across the sliding windows that is used for PAC computation.
+
+    References
+    ----------
+    .. [Tort2010] Tort, A. B. L., Komorowski, R., Eichenbaum, H., & 
+       Kopell, N. (2010). Measuring phase-amplitude coupling between 
+       neuronal oscillations of different frequencies. 
+       *Journal of Neurophysiology*, 104(2), 1195–1210.
+       https://doi.org/10.1152/jn.00106.201
     '''
+    # Data checks
+    if np.any(np.isnan(phase_amplitude_hist)): raise ValueError("Input contains NaN.")
+    if right_edge_effect not in ["ignore", "nan"]:
+        raise ValueError(
+            f"Invalid value for 'right_edge_effects': '{right_edge_effect}'. "
+            "Expected one of: 'ignore', 'nan'."
+        )
+    
+    # Tort's modulation index
+    # -----------------------
 
-    # Construct the phase distribution
-    if skip_allzero:
-        # Remove trials with no bursts
-        phase_burst_counts = phase_burst_counts[~(phase_burst_counts.sum(axis = (1, 2)) == 0)]
+    n_timepoints, n_bins = phase_amplitude_hist.shape[1], phase_amplitude_hist.shape[2]
 
-    # Sum counts in time windows
-    phase_dist = np.zeros_like(phase_burst_counts) # (num_trials, time, num_bins)
-    for win_idx in range(phase_dist.shape[1]):
-        phase_dist[:, win_idx, :] = np.sum(phase_burst_counts[:, win_idx : win_idx + win_len, :], axis = 1)
+    # Run a rectangular window across the (trials x time) dimensions
+    # Store the running count across num_bins
+    sliding_phase_dist = np.zeros((n_timepoints, n_bins)) # (n_timepoints, n_bins)
 
-    # Sum counts over trials
-    phase_dist = phase_dist.sum(axis = 0) # (time, num_bins)
+    for win_idx in range(n_timepoints):
+        sliding_phase_dist[win_idx] = np.sum(phase_amplitude_hist[:, win_idx : win_idx + win_len, :], axis = (0, 1))
 
-    # Compute modulation index for bursts aka PBC
-    num_bins = phase_dist.shape[1]
-    pbc = (np.log(num_bins) - entropy(phase_dist, axis = 1)) / np.log(num_bins)
+    # Compute PAC
+    pac = (np.log(n_bins) - entropy(sliding_phase_dist, axis = 1)) / np.log(n_bins)
 
-    return pbc, phase_dist
+    # Corrections
+    # -----------
+
+    # Correct for the right_edge_effects
+    if right_edge_effect == "nan":
+        pac[-win_len:] = np.nan
+
+    return pac, sliding_phase_dist
+
+
+def phase_burst_coupling(
+        phase_burst_counts: np.ndarray, 
+        win_len: int = 150, 
+        gamma: int = 90,
+        right_edge_effect: str = "ignore",
+        drop_negative_values: bool = False
+        ):
+    '''
+    Compute the phase-burst coupling (PBC) measure in a sliding window. PBC compares the entropy of the phase-burst distribution with that of the uniform distribution and reflects 
+    the degree to which bursts cluster at particular phase angles:
+
+    PBC_0(t) = [entropy(Unifrom distr.) - entropy(Phase-burst distr.)] / entropy(Unifrom distr.)
+    PBC(t) = PBC_0 * np.tanh(N(1) / gamma) - (1 - np.tanh(N(1) / gamma))
+
+    where entropy = -sum[p * ln(p)] and N(1) is the total number of burst timepoints within a window starting at t.
+
+    PBC_0 is the raw burst modulation index (see [Tort2010] for details). PBC is a corrected version that penalizes periods of low event counts by assigning 
+    them low confidence values. PBC ranges between -1 and 1 as follows:
+    - PBC = 1: perfect coupling.
+    - 0 <= PBC < 1: some coupling.
+    - PBC = 0: no coupling.
+    - -1 < PBC < 0: event count is low, the PBC estimate is unreliable.
+    - PBC = -1: no events in the window.
+
+    Parameters:
+    -----------
+    phase_burst_counts: np.ndarray of shape (n_trials, n_timepoints, n_bins)
+        Phase-burst counts.
+    
+    win_len: int
+        Length of the time window over which to compute counts.
+    
+    gamma: int, default = 90
+        The number of event time points within a window to achieve ~50% confidence.
+    
+    right_edge_effect: str, default = "ignore"
+        Strategy for handling sliding windows that extend past the right edge of the time series.
+        - "ignore": do nothing;
+        - "nan": assign NaN to the PBC values for the incomplete trailing windows, starting at index n_timepoints - win_len.
+    
+    drop_negative_values: bool, default = False
+        If True, values of PBC < 0 (low-confidence estimates due to a low event count) are replaced with NaNs.
+    
+    Returns:
+    --------
+    pbc: np.ndarray of shape (n_timepoints,)
+        Phase-burst coupling measure.
+
+    sliding_phase_dist: np.ndarray of shape (n_timepoints, n_bins)
+        The phase-burst distribution across the sliding windows that is used for PBC computation.
+
+    References
+    ----------
+    .. [Tort2010] Tort, A. B. L., Komorowski, R., Eichenbaum, H., & 
+       Kopell, N. (2010). Measuring phase-amplitude coupling between 
+       neuronal oscillations of different frequencies. 
+       *Journal of Neurophysiology*, 104(2), 1195–1210.
+       https://doi.org/10.1152/jn.00106.201
+    '''
+    # Data validity checks
+    if np.any(np.isnan(phase_burst_counts)): raise ValueError("Input contains NaN.")
+    if right_edge_effect not in ["ignore", "nan"]:
+        raise ValueError(
+            f"Invalid value for 'right_edge_effects': '{right_edge_effect}'. "
+            "Expected one of: 'ignore', 'nan'."
+        )
+    
+    # Tort's modulation index
+    # -----------------------
+
+    n_timepoints, n_bins = phase_burst_counts.shape[1], phase_burst_counts.shape[2]
+
+    # Run a rectangular window across the (trials x time) dimensions
+    # Store the running count across num_bins
+    sliding_phase_dist = np.zeros((n_timepoints, n_bins)) # (n_timepoints, n_bins)
+
+    for win_idx in range(n_timepoints):
+        sliding_phase_dist[win_idx] = np.sum(phase_burst_counts[:, win_idx : win_idx + win_len, :], axis = (0, 1))
+
+    # Compute PBC = modulation index for bursts
+    pbc = (np.log(n_bins) - entropy(sliding_phase_dist, axis = 1)) / np.log(n_bins)
+
+    # Corrections
+    # -----------
+
+    # Correct for the number of 1s within each window
+    total_n_ones_in_a_window = sliding_phase_dist.sum(axis = 1) # (time, )
+    pbc = pbc * np.tanh(total_n_ones_in_a_window / gamma) - (1 - np.tanh(total_n_ones_in_a_window / gamma))
+
+    # Correct for the right_edge_effects
+    if right_edge_effect == "nan":
+        pbc[-win_len:] = np.nan
+
+    # Correct for negative values (low number of 1s in the window)
+    if drop_negative_values:
+        pbc[pbc < 0] = np.nan
+
+    return pbc, sliding_phase_dist
 
 def phase_locking_value_hilb(
         LFP: np.ndarray,
@@ -272,9 +395,68 @@ def phase_lag_index(LFP: np.ndarray, directed: bool = True, dim: str = "trial", 
     
     return f, t, pli
 
-            
 
-        
+# LEGACY
 
+def phase_burst_coupling_legacy(phase_burst_counts: np.ndarray, win_len: int = 150, skip_allzero: bool = True):
+    '''
+    Compute the phase-burst coupling index (PBC), i.e., the modulation index for bursts.
+
+    Parameters:
+    -----------
+    phase_burst_counts: np.ndarray of shape (num_trials, time, num_bins)
+        Phase-burst counts.
+    
+    win_len: int
+        Length of the time window to compute counts over.
+
+    skip_allzero: bool, default = True
+        Skip trials with no events.
+    
+    Returns:
+    --------
+    pbc: np.ndarray of shape (time,)
+        Phase-burst coupling index.
+
+    phase_dist: np.ndarray of shape (time, num_bins)
+        Phase-burst distributions used to compute PBC.
+    '''
+
+    # Construct the phase distribution
+    if skip_allzero:
+        # Remove trials with no bursts
+        phase_burst_counts = phase_burst_counts[~(phase_burst_counts.sum(axis = (1, 2)) == 0)]
+
+    # Sum counts in time windows
+    phase_dist = np.zeros_like(phase_burst_counts) # (num_trials, time, num_bins)
+    for win_idx in range(phase_dist.shape[1]):
+        phase_dist[:, win_idx, :] = np.sum(phase_burst_counts[:, win_idx : win_idx + win_len, :], axis = 1)
+
+    # Sum counts over trials
+    phase_dist = phase_dist.sum(axis = 0) # (time, num_bins)
+
+    # Compute modulation index for bursts aka PBC
+    num_bins = phase_dist.shape[1]
+    pbc = (np.log(num_bins) - entropy(phase_dist, axis = 1)) / np.log(num_bins)
+
+    return pbc, phase_dist
+
+def compute_phase_burst_counts(
+        LFP: np.ndarray, 
+        bursts: np.ndarray, 
+        filter: bool = True, 
+        phase_freq_band: np.ndarray = np.array([1, 100]), 
+        num_bins: int = 18,
+        fs: int = 1000
+    ):
+    if filter == False:
+        raise NotImplementedError
+    
+    return phase_histogram(
+        LFP = LFP, 
+        events = bursts, 
+        phase_freq_band = phase_freq_band, 
+        num_bins = num_bins, 
+        fs = fs)
 
 

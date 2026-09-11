@@ -265,7 +265,10 @@ def make_burst_summary(
             burst_characteristics.append([duration, interval_to_the_next_burst, ampspr, frequency, n_cycles])
         
         # Summarize per trial
-        burst_characteristics = np.nanmean(np.array(burst_characteristics), axis = 0)
+        if len(burst_bounds) == 0:
+            burst_characteristics = np.ones(5) * np.nan
+        else:
+            burst_characteristics = np.nanmean(np.array(burst_characteristics), axis = 0)
         assert len(burst_characteristics) == 5
 
         for val_idx, key in enumerate(["burst_duration", "inter_burst_interval", "burst_ampspr", "burst_frequency", "burst_n_cycles"]):

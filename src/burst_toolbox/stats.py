@@ -1,6 +1,6 @@
 import numpy as np
 from skimage import measure
-from scipy.stats import ttest_rel, permutation_test
+from scipy.stats import ttest_rel, ttest_ind, permutation_test
 
 def cluster_correct(
         null_distrs: np.ndarray, 
@@ -113,6 +113,9 @@ def cluster_correct(
 def statistic_mean(x, y):
     return ttest_rel(x, y, axis = 0).statistic
 
+def statistic_ind(x, y):
+    return ttest_ind(x, y, axis = 0).statistic
+
 def cluster_test_period(
         sample: np.ndarray, 
         period: np.ndarray, 
@@ -190,6 +193,7 @@ def cluster_test_2samp(
         win_range: np.ndarray, 
         win_size: int, 
         statistic: callable = statistic_mean,
+        permutation_type = "samples",
         initial_detection_threshold: float = 1.96, 
         stat_q_threshold: float = 0.975,
         random_state: np.random.RandomState = np.random.RandomState(123)) -> np.ndarray:
@@ -203,7 +207,7 @@ def cluster_test_2samp(
         test = permutation_test(
             data = (sample1_window, sample2_window),
             statistic = statistic,
-            permutation_type = "samples",
+            permutation_type = permutation_type,
             n_resamples = 1000,
             random_state = random_state
         )
