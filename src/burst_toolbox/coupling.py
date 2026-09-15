@@ -90,10 +90,10 @@ def phase_amplitude_coupling(
     Returns:
     --------
     pac: np.ndarray of shape (n_timepoints,)
-        Phase-burst coupling measure.
+        Phase-amplitude coupling measure.
 
     sliding_phase_dist: np.ndarray of shape (n_timepoints, n_bins)
-        The phase-burst distribution across the sliding windows that is used for PAC computation.
+        The phase-amplitude distribution across the sliding windows that is used for PAC computation.
 
     References
     ----------
