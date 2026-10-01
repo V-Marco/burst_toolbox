@@ -111,10 +111,10 @@ def cluster_correct(
 # -----
 
 def statistic_mean(x, y):
-    return ttest_rel(x, y, axis = 0).statistic
+    return ttest_rel(x, y, axis = 0, nan_policy = "omit").statistic
 
 def statistic_ind(x, y):
-    return ttest_ind(x, y, axis = 0).statistic
+    return ttest_ind(x, y, axis = 0, nan_policy = "omit").statistic
 
 def cluster_test_period(
         sample: np.ndarray, 
@@ -182,7 +182,8 @@ def cluster_test_period(
 
     try:
         clusters_out = cluster_correct(null_distrs, observed_t_stats, initial_detection_threshold, stat_q_threshold)
-    except:
+    except Exception as e:
+        print(e)
         clusters_out = []
     
     return np.array(clusters_out)
