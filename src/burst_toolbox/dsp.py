@@ -51,7 +51,7 @@ def spectrogram_multitaper(LFP: np.ndarray, freqs: np.ndarray, correct_1f: bool 
 
     Parameters:
     -----------
-    LFP: np.ndarray of shape (n_trials, time)
+    LFP: np.ndarray of shape (n_trials, n_channels, time)
         LFP matrix.
     freqs: np.ndarray of shape (n_freqs, )
         Frequencies in Hz.
@@ -62,25 +62,26 @@ def spectrogram_multitaper(LFP: np.ndarray, freqs: np.ndarray, correct_1f: bool 
 
     Returns:
     --------
-    Pxx: np.ndarray of shape (n_trials, n_freqs, time)
+    Pxx: np.ndarray of shape (n_trials, n_channels, n_freqs, time)
         Spectrogram [dB].
 
     '''
     
     Pxx = tfr_array_multitaper(
-        data = LFP.reshape((LFP.shape[0], 1, LFP.shape[1])), 
+        data = LFP,
         sfreq = fs, 
         freqs = freqs, 
         n_cycles = freqs / 4, 
         time_bandwidth = 3.0, 
-        output = "power").squeeze() # (n_trials, n_freqs, time)
+        output = "power") # (n_trials, n_channels, n_freqs, time)
     
-    Pxx = Pxx + 1e-15
+    Pxx = 10 * np.log10(Pxx + 1e-15)
     
     # 1/f correct
     # -----------
     if correct_1f:
-        b, a = np.polyfit(np.log10(freqs), np.nanmean(Pxx, axis = (2, 0)), 1)
-        Pxx = Pxx - (a + b * np.log10(freqs))[:, None]
+        mean_power = np.nanmean(Pxx, axis = (0, 1, 3))
+        b, a = np.polyfit(np.log10(freqs), mean_power, 1)
+        Pxx = Pxx - (a + b * np.log10(freqs))[None, None, :, None]
 
     return 10 * Pxx
